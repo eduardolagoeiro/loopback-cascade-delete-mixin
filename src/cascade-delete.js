@@ -58,7 +58,11 @@ const cascadeDeletes = (modelId, Model, options) =>
   }));
 
 export default (Model, options) => {
-  Model.observe('after delete', (ctx) => {
+  Model.observe('after save', (ctx, next) => {
+    if (!ctx || !ctx.data || !ctx.data.deletedAt || !ctx.where || !ctx.where.and) {
+      return next();
+    }
+
     const name = idName(Model);
     const hasInstanceId = ctx.instance && ctx.instance[name];
     const hasWhereId = ctx.where && ctx.where[name];
@@ -74,7 +78,12 @@ export default (Model, options) => {
       return Promise.resolve();
     }
 
-    const modelInstanceId = getIdValue(Model, ctx.instance || ctx.where);
+    const modelInstanceId = getIdValue(Model, ctx.instance || ctx.where.and[0]);
+
+    if (!modelInstanceId) {
+      debug('Skipping delete for', Model.definition.name, 'Get id error.');
+      return Promise.resolve();
+    }
 
     return cascadeDeletes(modelInstanceId, Model, options)
       .then(() => {
