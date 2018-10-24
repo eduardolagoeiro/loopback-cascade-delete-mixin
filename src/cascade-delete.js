@@ -65,7 +65,8 @@ export default (Model, options) => {
 
     const name = idName(Model);
     const hasInstanceId = ctx.instance && ctx.instance[name];
-    const hasWhereId = ctx.where && ctx.where[name];
+    const where = ctx.where.and[0];
+    const hasWhereId = where && where[name];
     const hasMixinOption = options && Array.isArray(options.relations);
 
     if (!(hasWhereId || hasInstanceId)) {
