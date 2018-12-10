@@ -1,6 +1,4 @@
-import _debug from './debug';
-
-const debug = _debug();
+const debug = () => {};
 
 const idName = m => m.definition.idName() || 'id';
 const getIdValue = (m, data) => data && data[idName(m)];
@@ -42,22 +40,26 @@ const cascadeDeletes = (modelId, Model, options) =>
       loopback cascade-delete-mixin`);
     }
 
-
     const where = {};
     where[relationKey] = modelId;
-
-    if (relationDeepDelete || (relationDeepDelete && options.deepDelete)) {
-      const instancesToDelete = await relationModel.find({ where });
-
-      instancesToDelete.forEach(async (instance) => {
-        await instance.destroy();
+    if (relationDeepDelete || options.deepDelete) {
+      const instancesToDelete = await new Promise((resolve) => {
+        relationModel.find({ where }, (err, instancesToDelete) => {
+          resolve(instancesToDelete);
+        });
       });
+
+      await Promise.all(instancesToDelete.map(item => new Promise((resolve, reject) => {
+        item.destroy(resolve);
+      })));
     } else {
-      await relationModel.destroyAll(where);
+      await new Promise((resolve, reject) => {
+        relationModel.destroyAll(where, resolve);
+      });
     }
   }));
 
-export default (Model, options) => {
+module.exports = (Model, options) => {
   Model.observe('after save', (ctx, next) => {
     if (!ctx || !ctx.data || !ctx.data.deletedAt || !ctx.where || !ctx.where.and) {
       return next();
@@ -85,6 +87,34 @@ export default (Model, options) => {
       debug('Skipping delete for', Model.definition.name, 'Get id error.');
       return Promise.resolve();
     }
+
+    return cascadeDeletes(modelInstanceId, Model, options)
+      .then(() => {
+        debug('Cascade delete has successfully finished');
+        return true;
+      })
+      .catch((err) => {
+        debug('Error with cascading deletes', err);
+        return Promise.reject(err);
+      });
+  });
+  Model.observe('after delete', (ctx) => {
+    const name = idName(Model);
+    const hasInstanceId = ctx.instance && ctx.instance[name];
+    const hasWhereId = ctx.where && ctx.where[name];
+    const hasMixinOption = options && Array.isArray(options.relations);
+
+    if (!(hasWhereId || hasInstanceId)) {
+      debug('Skipping delete for ', Model.definition.name);
+      return Promise.resolve();
+    }
+
+    if (!hasMixinOption) {
+      debug('Skipping delete for', Model.definition.name, 'Please add mixin options');
+      return Promise.resolve();
+    }
+
+    const modelInstanceId = getIdValue(Model, ctx.instance || ctx.where);
 
     return cascadeDeletes(modelInstanceId, Model, options)
       .then(() => {
